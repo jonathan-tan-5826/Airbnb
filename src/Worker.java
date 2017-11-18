@@ -31,6 +31,10 @@ public class Worker implements Runnable {
 	private int _year;
 	private List<CityZip> _cityZip;
 	private String _proxyAddress;
+	
+	private final String LISTING_CSS_SELECTOR = "div._fhph4u ._1uyh6pwn";
+	private final String PRICE_BUTTON_CSS_SELECTOR = "button[aria-controls='menuItemComponent-price']";
+	private final String PRICE_TEXT_CLASS = "_150a3jym";
 
 	public Worker(String name, String state, List<CityZip> cityZip, String proxyAddress,
 			String checkInDate, String checkOutDate, int month, int year) {
@@ -45,27 +49,19 @@ public class Worker implements Runnable {
 	}
 
 	public void run() {
-		System.out.println("[V2.04] Running " + _name);
+		System.out.println("[V2.05] Running " + _name);
 		try {
 			System.out.println("[" + _name + "]: Using proxy address: " + _proxyAddress);
-			Proxy proxy = new Proxy();
-		    proxy.setAutodetect(false);
-		    proxy.setProxyType(Proxy.ProxyType.MANUAL);
-			proxy.setHttpProxy(_proxyAddress).setFtpProxy(_proxyAddress).setSslProxy(_proxyAddress);
-		    DesiredCapabilities cap = new DesiredCapabilities();
-		    cap.setCapability(CapabilityType.PROXY, proxy);
-		    
+		    DesiredCapabilities cap = GetDesiredCapabilities();
 			WebDriver driver = new FirefoxDriver(cap);
-//			driver.get("https://ipinfo.io");
-//			WebElement test = (new WebDriverWait(driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
-//			System.out.println("[" + _name + "]: IpAddress = " + test.getText());
+			TestIpAddress(driver);
 			_connection = getConnection();
-			int count = 0;
-			for (count = 0; count < _cityZip.size(); ++count) {
+			
+			for (int count = 0; count < _cityZip.size(); ++count) {
 				String city = _cityZip.get(count).getCity();
 				String zipcode = _cityZip.get(count).getZipcode();
-
 				crawlZipcode(driver, city, zipcode);
+				
 				System.out.println(_cityZip.size() - count - 1 + " zipcodes remaining.");
 			}
 			_connection.close();
@@ -77,11 +73,34 @@ public class Worker implements Runnable {
 		}
 		System.out.println("[" + _name + "]: exiting.");
 	}
+	
+	public void TestIpAddress(WebDriver driver)
+	{
+		driver.get("https://ipinfo.io");
+		WebElement test = (new WebDriverWait(driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
+		System.out.println("[" + _name + "]: IpAddress = " + test.getText());
+	}
+	
+	public DesiredCapabilities GetDesiredCapabilities()
+	{
+		Proxy proxy = new Proxy();
+	    proxy.setAutodetect(false);
+	    proxy.setProxyType(Proxy.ProxyType.MANUAL);
+		proxy.setHttpProxy(_proxyAddress).setFtpProxy(_proxyAddress).setSslProxy(_proxyAddress);
+		
+	    FirefoxProfile profile = new FirefoxProfile();
+	    profile.setPreference(FirefoxProfile.ALLOWED_HOSTS_PREFERENCE, "localhost");
+	    
+	    DesiredCapabilities cap = new DesiredCapabilities();
+	    cap.setCapability(CapabilityType.PROXY, proxy);
+	    cap.setCapability(FirefoxDriver.PROFILE, profile);
+	    
+	    return cap;
+	}
 
 	public void crawlZipcode(WebDriver driver, String city, String zipcode) throws Exception {
 		try {
 			System.out.println("[" + _name + "]: Crawling " + zipcode + ", " + _checkInDate + " - " + _checkOutDate);
-	
 			String searchParameter = _state + " " + zipcode + ", United-States";
 			String url = "https://www.airbnb.com/s/" + searchParameter + "/homes?checkin=" + _checkInDate + "&checkout="
 					+ _checkOutDate;
@@ -97,8 +116,8 @@ public class Worker implements Runnable {
 			writeStringToFile(directory, fileName, driver.getPageSource());
 
 			// Verify there are at least 5 listings
-			(new WebDriverWait(driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("div._o1rkka ._1uyh6pwn")));
-			if (driver.findElements(By.cssSelector("div._o1rkka ._1uyh6pwn")).size() >= 5) {
+			(new WebDriverWait(driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(LISTING_CSS_SELECTOR)));
+			if (driver.findElements(By.cssSelector(LISTING_CSS_SELECTOR)).size() >= 5) {
 				System.out.println("[" + _name + "][Success] Sufficient listings");
 	
 				// Save PageSource
@@ -107,8 +126,7 @@ public class Worker implements Runnable {
 				// Wait for Price Range Button Element
 				WebElement priceRangeButton = (new WebDriverWait(driver, 10))
 					.until(ExpectedConditions.presenceOfElementLocated
-//							(By.xpath("//*[@id=\"site-content\"]/div/div[1]/div/div[1]/div/div[2]/div/span/div/div[2]/div/div/button")));
-							(By.cssSelector("button[aria-controls='menuItemComponent-price']")));
+							(By.cssSelector(PRICE_BUTTON_CSS_SELECTOR)));
 	
 				// Click Price Button Element
 				priceRangeButton.click();
@@ -118,8 +136,7 @@ public class Worker implements Runnable {
 				// Wait for Price Text
 				WebElement priceText = (new WebDriverWait(driver, 10))
 					.until(ExpectedConditions.presenceOfElementLocated
-//							(By.xpath("//*[@id=\"menuItemComponent-price\"]/div/div/div[1]/div[1]/div[2]/span")));
-							(By.className("_150a3jym")));
+							(By.className(PRICE_TEXT_CLASS)));
 	
 				System.out.println("[" + _name + "] priceText = " + priceText.getText());
 	

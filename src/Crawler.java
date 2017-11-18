@@ -42,6 +42,7 @@ public class Crawler {
 			"d08.cs.ucr.edu:3128", "d09.cs.ucr.edu:3128", "d10.cs.ucr.edu:3128", "dblab-rack10.cs.ucr.edu:3128",
 			"dblab-rack11.cs.ucr.edu:3128", "dblab-rack12.cs.ucr.edu:3128", "dblab-rack13.cs.ucr.edu:3128",
 			"dblab-rack14.cs.ucr.edu:3128", "dblab-rack15.cs.ucr.edu:3128"};
+	private static final int NUM_BUCKETS = 5;
 
 	/**
 	 * @title main
@@ -101,7 +102,7 @@ public class Crawler {
 		} else if (selection.length() == 2) {
 			crawlState(selection, month, year);
 		} else if (selection.equals("test")) {
-			System.out.println("Test V2.3 selected");
+			System.out.println("Test V2.05 selected");
 			Crawler crawler = new Crawler();
 			FirefoxProfile profile = new FirefoxProfile();
 			profile.setPreference(FirefoxProfile.ALLOWED_HOSTS_PREFERENCE, "localhost");
@@ -111,6 +112,7 @@ public class Crawler {
 			proxy.setHttpProxy("dblab-rack11.cs.ucr.edu:3128").setFtpProxy("dblab-rack11.cs.ucr.edu:3128").setSslProxy("dblab-rack11.cs.ucr.edu:3128");
 		    DesiredCapabilities cap = new DesiredCapabilities();
 		    cap.setCapability(CapabilityType.PROXY, proxy);
+		    cap.setCapability(FirefoxDriver.PROFILE, profile);
 			crawler._driver = new FirefoxDriver(cap);
 			crawler._driver.get("https://ipinfo.io");
 			WebElement test = (new WebDriverWait(crawler._driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
@@ -178,128 +180,30 @@ public class Crawler {
 			ResultSet result = statement.executeQuery(
 					"SELECT city, zip FROM cities_extended WHERE state_code='" + state + "' order by zip");
 
-			int numBuckets = 10;
-			System.out.println("Total buckets: " + numBuckets);
-			List<List<CityZip>> buckets = new ArrayList<List<CityZip>>(numBuckets);
-			for (int i = 0; i < numBuckets; ++i) {
+			System.out.println("Total buckets: " + NUM_BUCKETS);
+			List<List<CityZip>> buckets = new ArrayList<List<CityZip>>(NUM_BUCKETS);
+			for (int i = 0; i < NUM_BUCKETS; ++i) {
 				buckets.add(new ArrayList<CityZip>());
 			}
 
-			ArrayList<Thread> threads = new ArrayList<Thread>(numBuckets);
-			ArrayList<Boolean> threadsStatus = new ArrayList<Boolean>(numBuckets);
+			ArrayList<Thread> threads = new ArrayList<Thread>(NUM_BUCKETS);
+			ArrayList<Boolean> threadStatuses = new ArrayList<Boolean>(NUM_BUCKETS);
 			int counter = 0;
 			while (result.next()) {
 				String city = result.getString("city");
 				String zipcode = result.getString("zip");
-
-				CityZip CityZip = new CityZip(city, zipcode);
-
-				if (counter % 10 == 0) {
-					buckets.get(0).add(CityZip);
-				} else if (counter % 10 == 1) {
-					buckets.get(1).add(CityZip);
-				} else if (counter % 10 == 2) {
-					buckets.get(2).add(CityZip);
-				} else if (counter % 10 == 3) {
-					buckets.get(3).add(CityZip);
-				} else if (counter % 10 == 4) {
-					buckets.get(4).add(CityZip);
-				} else if (counter % 10 == 5) {
-					buckets.get(5).add(CityZip);
-				} else if (counter % 10 == 6) {
-					buckets.get(6).add(CityZip);
-				} else if (counter % 10 == 7) {
-					buckets.get(7).add(CityZip);
-				} else if (counter % 10 == 8) {
-					buckets.get(8).add(CityZip);
-				} else if (counter % 10 == 9) {
-					buckets.get(9).add(CityZip);
-				}
-				++counter;
+				CityZip cityZip = new CityZip(city, zipcode);
+				
+				int target = (counter++) % NUM_BUCKETS;
+				buckets.get(target).add(cityZip);
 			}
 			result.close();
-
-			for (int i = 0; i < numBuckets; ++i) {
-				if (!buckets.get(i).isEmpty()) {
-					System.out.println("bucket " + i + " size: " + buckets.get(i).size());
-
-					String proxyAddress = PROXIES[i];
-					threadsStatus.add(true);
-					String workerName = String.format("worker #" + i);
-					Worker worker = new Worker(workerName, state, buckets.get(i), proxyAddress, checkInDate,
-							checkOutDate, month, year);
-					threads.add(new Thread(worker));
-					threads.get(i).start();
-				} else {
-					threadsStatus.add(false);
-					threads.add(null);
-				}
-			}
+			
+			CreateWorkerThreads(buckets, threads, threadStatuses, state, month, year, checkInDate, checkOutDate);
 
 			do {
-				if ((threadsStatus.get(0)) && (threads.get(0) != null)) {
-					if (!threads.get(0).isAlive()) {
-						threadsStatus.set(0, false);
-						System.out.println("Thread 0 is dead.");
-					}
-				}
-				if ((threadsStatus.get(1)) && (threads.get(1) != null)) {
-					if (!threads.get(1).isAlive()) {
-						threadsStatus.set(1, false);
-						System.out.println("Thread 1 is dead.");
-					}
-				}
-				if ((threadsStatus.get(2)) && (threads.get(2) != null)) {
-					if (!threads.get(2).isAlive()) {
-						threadsStatus.set(2, false);
-						System.out.println("Thread 2 is dead.");
-					}
-				}
-				if ((threadsStatus.get(3)) && (threads.get(3) != null)) {
-					if (!threads.get(3).isAlive()) {
-						threadsStatus.set(3, false);
-						System.out.println("Thread 3 is dead.");
-					}
-				}
-				if ((threadsStatus.get(4)) && (threads.get(4) != null)) {
-					if (!threads.get(4).isAlive()) {
-						threadsStatus.set(4, false);
-						System.out.println("Thread 4 is dead.");
-					}
-				}
-				if ((threadsStatus.get(5)) && (threads.get(5) != null)) {
-					if (!threads.get(5).isAlive()) {
-						threadsStatus.set(5, false);
-						System.out.println("Thread 5 is dead.");
-					}
-				}
-				if ((threadsStatus.get(6)) && (threads.get(6) != null)) {
-					if (!threads.get(6).isAlive()) {
-						threadsStatus.set(6, false);
-						System.out.println("Thread 6 is dead.");
-					}
-				}
-				if ((threadsStatus.get(7)) && (threads.get(7) != null)) {
-					if (!threads.get(7).isAlive()) {
-						threadsStatus.set(7, false);
-						System.out.println("Thread 7 is dead.");
-					}
-				}
-				if ((threadsStatus.get(8)) && (threads.get(8) != null)) {
-					if (!threads.get(8).isAlive()) {
-						threadsStatus.set(8, false);
-						System.out.println("Thread 8 is dead.");
-					}
-				}
-				if ((threadsStatus.get(9)) && (threads.get(9) != null)) {
-					if (!threads.get(9).isAlive()) {
-						threadsStatus.set(9, false);
-						System.out.println("Thread 9 is dead.");
-					}
-				}
-			} while (threadsStatus.get(0) || threadsStatus.get(1) || threadsStatus.get(2) || threadsStatus.get(3)
-					|| threadsStatus.get(4) || threadsStatus.get(5) || threadsStatus.get(6) || threadsStatus.get(7)
-					|| threadsStatus.get(8) || threadsStatus.get(9));
+				UpdateThreadStatuses(threads, threadStatuses);
+			} while (ThreadsAreActive(threadStatuses));
 
 			System.out.println("Finished crawling " + state + ", " + month + "/" + year);
 		} catch (Exception e) {
@@ -308,16 +212,97 @@ public class Crawler {
 			System.exit(-1);
 		}
 	}
+	
+	/**
+	 * @title CreateWorkerThreads
+	 * @param buckets <List<List<CityZip>>>,
+	 * 		  threads <ArrayList<Thread>>,
+	 * 		  threadStatuses <ArrayList<Boolean>>,
+	 * 	      state <String>,
+	 *   	  month <int>,
+	 *        year <int>,
+	 *        checkInDate <String>,
+	 *        checkOutDate <String>
+	 * @return 
+	 * @desc Creates worker threads.
+	 */
+	public static void CreateWorkerThreads(List<List<CityZip>> buckets, 
+			ArrayList<Thread> threads, 
+			ArrayList<Boolean> threadStatuses, 
+			String state, 
+			int month, 
+			int year, 
+			String checkInDate, 
+			String checkOutDate)
+	{
+		for (int i = 0; i < NUM_BUCKETS; ++i) {
+			if (!buckets.get(i).isEmpty()) {
+				System.out.println("bucket " + i + " size: " + buckets.get(i).size());
+
+				String proxyAddress = PROXIES[i];
+				String workerName = String.format("Worker #" + i);
+				Worker worker = new Worker(workerName,
+						state,
+						buckets.get(i),
+						proxyAddress,
+						checkInDate,
+						checkOutDate,
+						month,
+						year);
+				threads.add(new Thread(worker));
+				threadStatuses.add(true);
+				threads.get(i).start();
+			} else {
+				threadStatuses.add(false);
+				threads.add(null);
+			}
+		}
+	}
+	
+	/**
+	 * @title ThreadsAreActive
+	 * @param threadStatuses <ArrayList<Boolean>>
+	 * @return True if any threadStatus is true, else false.
+	 */
+	public static boolean ThreadsAreActive(ArrayList<Boolean> threadStatuses)
+	{
+		for (Boolean status : threadStatuses)
+		{
+			if (status) return true;
+		}
+		return false;
+	}
 
 	/**
-	 * @title crawlZipcode
-	 * @param city<String>,
-	 *            zipcode<String>
+	 * @title UpdateThreadStatuses
+	 * @param threads<ArrayList<Thread>>,
+	 *        threadStatuses<ArrayList<Boolean>>
 	 * @return
-	 * @desc Extracts airbnb's average-price/month for zipcode for month<int>,
+	 * @desc Sets threadStatuses[i] to false if a thread[i] is no longer active.
+	 */
+	public static void UpdateThreadStatuses(ArrayList<Thread> threads, ArrayList<Boolean> threadStatuses)
+	{
+		for (int i = 0; i < NUM_BUCKETS; ++i)
+		{
+			if ((threadStatuses.get(i)) && (threads.get(i) != null) && (!threads.get(i).isAlive())) 
+			{
+				threadStatuses.set(i, false);
+				System.out.println("Thread " + i + " is dead.");
+			}
+		}
+	}
+	
+	/**
+	 * @title crawlZipcode
+	 * @param zipcode<String>
+	 * 		  state<String>
+	 * 		  month<int>
+	 *        year<int>
+	 * @return
+	 * @desc Extracts airbnb's average-price/month for zipcode<String> for month<int>,
 	 *       year<int> and stores extracted data into database.
 	 */
-	public void crawlZipcode(String zipcode, String state, int year, int month) throws Exception {
+	public void crawlZipcode(String zipcode, String state, int month, int year) throws Exception {
 		try {
 			System.out.println("Started crawler v2 on " + zipcode + ", " + month + "/" + year);
 			Calendar calendar = new GregorianCalendar(year, month - 1, 1);
