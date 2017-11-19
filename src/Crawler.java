@@ -27,6 +27,8 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 public class Crawler {
 	private static Connection _connection;
 	private WebDriver _driver;
+	private static int _numBuckets = 15;
+	private static final String VERSION = "2.06";
 	private static final String[] GROUP_ONE = { "AL", "AR", "CA" };
 	private static final String[] GROUP_TWO = { "AK", "AZ", "MI", "NY" };
 	private static final String[] GROUP_THREE = { "CO", "GA", "PA", "UT" };
@@ -42,8 +44,7 @@ public class Crawler {
 			"d08.cs.ucr.edu:3128", "d09.cs.ucr.edu:3128", "d10.cs.ucr.edu:3128", "dblab-rack10.cs.ucr.edu:3128",
 			"dblab-rack11.cs.ucr.edu:3128", "dblab-rack12.cs.ucr.edu:3128", "dblab-rack13.cs.ucr.edu:3128",
 			"dblab-rack14.cs.ucr.edu:3128", "dblab-rack15.cs.ucr.edu:3128"};
-	private static final int NUM_BUCKETS = 5;
-
+	
 	/**
 	 * @title main
 	 * @param args<String[]>
@@ -51,15 +52,16 @@ public class Crawler {
 	 * @desc Main function
 	 */
 	public static void main(String[] args) throws Exception {
-		if (args.length < 3) {
+		if (args.length < 4) {
 			System.out.println("Error: Not enough arguments passed in.");
-			System.out.println("Correct usage: ./crawler <selection> <month> <year>");
+			System.out.println("Correct usage: ./crawler <selection> <month> <year> <num_threads>");
 			System.exit(1);
 		}
 
 		String selection = args[0];
 		int month = convertToInt(args[1]);
 		int year = convertToInt(args[2]);
+		_numBuckets = convertToInt(args[3]);
 
 		if (month < 1 || month > 12) {
 			System.out.println("Error: Invalid month passed in. Value must be between 1-12");
@@ -102,7 +104,7 @@ public class Crawler {
 		} else if (selection.length() == 2) {
 			crawlState(selection, month, year);
 		} else if (selection.equals("test")) {
-			System.out.println("Test V2.05 selected");
+			System.out.println("Test " + VERSION + " selected");
 			Crawler crawler = new Crawler();
 			FirefoxProfile profile = new FirefoxProfile();
 			profile.setPreference(FirefoxProfile.ALLOWED_HOSTS_PREFERENCE, "localhost");
@@ -180,21 +182,21 @@ public class Crawler {
 			ResultSet result = statement.executeQuery(
 					"SELECT city, zip FROM cities_extended WHERE state_code='" + state + "' order by zip");
 
-			System.out.println("Total buckets: " + NUM_BUCKETS);
-			List<List<CityZip>> buckets = new ArrayList<List<CityZip>>(NUM_BUCKETS);
-			for (int i = 0; i < NUM_BUCKETS; ++i) {
+			System.out.println("Total buckets: " + _numBuckets);
+			List<List<CityZip>> buckets = new ArrayList<List<CityZip>>(_numBuckets);
+			for (int i = 0; i < _numBuckets; ++i) {
 				buckets.add(new ArrayList<CityZip>());
 			}
 
-			ArrayList<Thread> threads = new ArrayList<Thread>(NUM_BUCKETS);
-			ArrayList<Boolean> threadStatuses = new ArrayList<Boolean>(NUM_BUCKETS);
+			ArrayList<Thread> threads = new ArrayList<Thread>(_numBuckets);
+			ArrayList<Boolean> threadStatuses = new ArrayList<Boolean>(_numBuckets);
 			int counter = 0;
 			while (result.next()) {
 				String city = result.getString("city");
 				String zipcode = result.getString("zip");
 				CityZip cityZip = new CityZip(city, zipcode);
 				
-				int target = (counter++) % NUM_BUCKETS;
+				int target = (counter++) % _numBuckets;
 				buckets.get(target).add(cityZip);
 			}
 			result.close();
@@ -235,20 +237,22 @@ public class Crawler {
 			String checkInDate, 
 			String checkOutDate)
 	{
-		for (int i = 0; i < NUM_BUCKETS; ++i) {
+		for (int i = 0; i < _numBuckets; ++i) {
 			if (!buckets.get(i).isEmpty()) {
 				System.out.println("bucket " + i + " size: " + buckets.get(i).size());
 
 				String proxyAddress = PROXIES[i];
 				String workerName = String.format("Worker #" + i);
-				Worker worker = new Worker(workerName,
+				Worker worker = new Worker(
+						workerName,
 						state,
 						buckets.get(i),
 						proxyAddress,
 						checkInDate,
 						checkOutDate,
 						month,
-						year);
+						year,
+						VERSION);
 				threads.add(new Thread(worker));
 				threadStatuses.add(true);
 				threads.get(i).start();
@@ -282,7 +286,7 @@ public class Crawler {
 	 */
 	public static void UpdateThreadStatuses(ArrayList<Thread> threads, ArrayList<Boolean> threadStatuses)
 	{
-		for (int i = 0; i < NUM_BUCKETS; ++i)
+		for (int i = 0; i < _numBuckets; ++i)
 		{
 			if ((threadStatuses.get(i)) && (threads.get(i) != null) && (!threads.get(i).isAlive())) 
 			{

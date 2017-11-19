@@ -31,13 +31,13 @@ public class Worker implements Runnable {
 	private int _year;
 	private List<CityZip> _cityZip;
 	private String _proxyAddress;
-	
+	private String _version;
 	private final String LISTING_CSS_SELECTOR = "div._fhph4u ._1uyh6pwn";
 	private final String PRICE_BUTTON_CSS_SELECTOR = "button[aria-controls='menuItemComponent-price']";
 	private final String PRICE_TEXT_CLASS = "_150a3jym";
 
 	public Worker(String name, String state, List<CityZip> cityZip, String proxyAddress,
-			String checkInDate, String checkOutDate, int month, int year) {
+			String checkInDate, String checkOutDate, int month, int year, String version) {
 		_name = name;
 		_state = state;
 		_cityZip = cityZip;
@@ -46,10 +46,11 @@ public class Worker implements Runnable {
 		_proxyAddress = proxyAddress;
 		_month = month;
 		_year = year;
+		_version = version;
 	}
 
 	public void run() {
-		System.out.println("[V2.05] Running " + _name);
+		System.out.println("[" + _version + "] Running " + _name);
 		try {
 			System.out.println("[" + _name + "]: Using proxy address: " + _proxyAddress);
 		    DesiredCapabilities cap = GetDesiredCapabilities();
@@ -132,11 +133,21 @@ public class Worker implements Runnable {
 				priceRangeButton.click();
 				System.out.println("Button clicked");
 				Thread.sleep(2000);
-	
+				
 				// Wait for Price Text
-				WebElement priceText = (new WebDriverWait(driver, 10))
-					.until(ExpectedConditions.presenceOfElementLocated
-							(By.className(PRICE_TEXT_CLASS)));
+				WebElement priceText = null;
+				try
+				{
+					priceText = (new WebDriverWait(driver, 10))
+							.until(ExpectedConditions.presenceOfElementLocated(By.className(PRICE_TEXT_CLASS)));
+				}
+				catch (Exception e)
+				{
+					// Price text did not show up on page despite there being listings. Error out!
+					System.err.println("[" + _name + "] ERROR: " + e.getMessage());
+					e.printStackTrace();
+					System.exit(-1);
+				}
 	
 				System.out.println("[" + _name + "] priceText = " + priceText.getText());
 	
