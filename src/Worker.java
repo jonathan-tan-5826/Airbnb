@@ -1,4 +1,3 @@
-
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -10,7 +9,9 @@ import java.util.List;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.openqa.selenium.By;
+import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.Proxy;
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebDriverException;
 import org.openqa.selenium.WebElement;
@@ -32,12 +33,19 @@ public class Worker implements Runnable {
 	private List<CityZip> _cityZip;
 	private String _proxyAddress;
 	private String _version;
-	private final String LISTING_CSS_SELECTOR = "div._fhph4u ._1uyh6pwn";
-	private final String PRICE_BUTTON_CSS_SELECTOR = "button[aria-controls='menuItemComponent-price']";
-	private final String PRICE_TEXT_CLASS = "_150a3jym";
+	private String _suffix;
+	private static final String LISTING_CSS_SELECTOR = "div._fhph4u ._1mpo9ida";
+	private static final String PRICE_BUTTON_CSS_SELECTOR = "button[aria-controls='menuItemComponent-price_range']";
+	private static final String PRICE_BUTTON_CSS_SELECTOR2 = "button[aria-controls='menuItemComponent-price']";
+	private static final String PRICE_TEXT_CLASS = "_150a3jym";
+	private static final String PER_MONTH_SPAN_XPATH = "//span[.='Per month']";
+	private static final String CITY_XPATH = "//*[@id=\"english-canonical-url\"]";
+	private static final String PREFIX = "/s/";
+	private boolean _testIp;
+	private boolean _didTestIp = false;
 
-	public Worker(String name, String state, List<CityZip> cityZip, String proxyAddress,
-			String checkInDate, String checkOutDate, int month, int year, String version) {
+	public Worker(String name, String state, List<CityZip> cityZip, String proxyAddress, String checkInDate,
+			String checkOutDate, int month, int year, String version, boolean testIp) {
 		_name = name;
 		_state = state;
 		_cityZip = cityZip;
@@ -47,18 +55,28 @@ public class Worker implements Runnable {
 		_month = month;
 		_year = year;
 		_version = version;
+		_testIp = testIp;
+		_suffix = "--" + _state;
 	}
 
 	public void run() {
 		System.out.println("[" + _version + "] Running " + _name);
 		try {
 			System.out.println("[" + _name + "]: Using proxy address: " + _proxyAddress);
-		    DesiredCapabilities cap = GetDesiredCapabilities();
+			DesiredCapabilities cap = GetDesiredCapabilities();
 			WebDriver driver = new FirefoxDriver(cap);
-			TestIpAddress(driver);
 			_connection = getConnection();
-			
+
 			for (int count = 0; count < _cityZip.size(); ++count) {
+				if (!_didTestIp)
+				{
+					if (_testIp)
+					{
+						TestIpAddress(driver);
+					}
+					_didTestIp = true;
+				}
+				
 				String city = _cityZip.get(count).getCity();
 				String zipcode = _cityZip.get(count).getZipcode();
 				crawlZipcode(driver, city, zipcode);
@@ -70,126 +88,172 @@ public class Worker implements Runnable {
 		} catch (Exception e) {
 			System.err.println("[" + _name + "] ERROR: " + e.getMessage());
 			e.printStackTrace();
-			System.exit(-1);
 		}
 		System.out.println("[" + _name + "]: exiting.");
 	}
-	
-	public void TestIpAddress(WebDriver driver)
-	{
+
+	public void TestIpAddress(WebDriver driver) {
 		driver.get("https://ipinfo.io");
-		WebElement test = (new WebDriverWait(driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
+		WebElement test = (new WebDriverWait(driver, 30)).until(
+				ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
 		System.out.println("[" + _name + "]: IpAddress = " + test.getText());
 	}
-	
-	public DesiredCapabilities GetDesiredCapabilities()
-	{
+
+	public DesiredCapabilities GetDesiredCapabilities() {
 		Proxy proxy = new Proxy();
-	    proxy.setAutodetect(false);
-	    proxy.setProxyType(Proxy.ProxyType.MANUAL);
+		proxy.setAutodetect(false);
+		proxy.setProxyType(Proxy.ProxyType.MANUAL);
 		proxy.setHttpProxy(_proxyAddress).setFtpProxy(_proxyAddress).setSslProxy(_proxyAddress);
-		
-	    FirefoxProfile profile = new FirefoxProfile();
-	    profile.setPreference(FirefoxProfile.ALLOWED_HOSTS_PREFERENCE, "localhost");
-	    
-	    DesiredCapabilities cap = new DesiredCapabilities();
-	    cap.setCapability(CapabilityType.PROXY, proxy);
-	    cap.setCapability(FirefoxDriver.PROFILE, profile);
-	    
-	    return cap;
+
+		FirefoxProfile profile = new FirefoxProfile();
+		profile.setPreference(FirefoxProfile.ALLOWED_HOSTS_PREFERENCE, "localhost");
+
+		DesiredCapabilities cap = new DesiredCapabilities();
+		cap.setCapability(CapabilityType.PROXY, proxy);
+		cap.setCapability(FirefoxDriver.PROFILE, profile);
+
+		return cap;
 	}
 
 	public void crawlZipcode(WebDriver driver, String city, String zipcode) throws Exception {
-		try {
-			System.out.println("[" + _name + "]: Crawling " + zipcode + ", " + _checkInDate + " - " + _checkOutDate);
-			String searchParameter = _state + " " + zipcode + ", United-States";
-			String url = "https://www.airbnb.com/s/" + searchParameter + "/homes?checkin=" + _checkInDate + "&checkout="
-					+ _checkOutDate;
-			System.out.println(url);
+		boolean didCrawl = false;
+		boolean isSecondCrawlAttempt = false;
+		boolean isOldPriceText = false;
+		String searchParameter = _state + " " + zipcode + ", United-States";
+		String url = "https://www.airbnb.com/s/" + searchParameter + "/homes?checkin=" + _checkInDate + "&checkout="
+				+ _checkOutDate;
+		
+		while (!didCrawl && !isSecondCrawlAttempt)
+		{
+			try {
+				System.out.println("[" + _name + "]: Crawling " + zipcode + ", " + _checkInDate + " - " + _checkOutDate);
+				System.out.println(url);
 	
-			// Load Page
-			driver.get(url);
+				// Load Page
+				driver.get(url);
+				
+				// Verify city
+				(new WebDriverWait(driver, 15)).until(ExpectedConditions.presenceOfElementLocated(By.xpath(CITY_XPATH)));
+				List<WebElement> cityTexts = driver.findElements(By.xpath(CITY_XPATH));
+				if (cityTexts.size() > 0)
+				{
+					String foundCity = StringUtils.substringBetween(cityTexts.get(0).getAttribute("content").toString(), PREFIX, _suffix);
+					if ((foundCity != null) && (foundCity.toLowerCase().replaceAll("-", " ").equals(city.toLowerCase()))) {
+						System.out.println("[" + _name + "]:[Success] City verified.");
+						
+						// Verify there are at least 5 listings
+						(new WebDriverWait(driver, 15))
+								.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(LISTING_CSS_SELECTOR)));
+						if (driver.findElements(By.cssSelector(LISTING_CSS_SELECTOR)).size() >= 5) {
+							System.out.println("[" + _name + "]:[Success] Sufficient listings");
 			
-			String yearMonthDirectory = _year + "_" + String.format("%02d", _month);
-			String modifiedCity = city.replaceAll(" ", "-");
-			String fileName = zipcode + "_" + modifiedCity + "_" + _month + "_" + _year + ".txt";
-			String directory = "./pagesources/" + yearMonthDirectory + "/" + _state + "/";
-			writeStringToFile(directory, fileName, driver.getPageSource());
-
-			// Verify there are at least 5 listings
-			(new WebDriverWait(driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(LISTING_CSS_SELECTOR)));
-			if (driver.findElements(By.cssSelector(LISTING_CSS_SELECTOR)).size() >= 5) {
-				System.out.println("[" + _name + "][Success] Sufficient listings");
-	
-				// Save PageSource
-				writeStringToFile(directory, fileName, driver.getPageSource());
+							// Verify period
+							List<WebElement> foundPeriods = driver.findElements(By.xpath(PER_MONTH_SPAN_XPATH));
+							if (foundPeriods.size() > 0) {
+								System.out.println("[" + _name + "]:[Success] Period verified.");
+									
+								WebElement priceRangeButton = null;
+								try {
+									// Wait for Price Range Button Element
+									priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR, 15);
+								} catch (WebDriverException e) {
+									// Price button did not show up on page despite there being listings. Try other CSS selector.
+									System.err.println("[" + _name + "]: ERROR GETTING PRICE RANGE BUTTON1: " + url);
+									System.err.println(e.getMessage());
+									
+									try {
+										priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR2, 15);
+										isOldPriceText = true;
+									} catch (WebDriverException e2) {
+										// Both CSS selectors failed, try again if isSecondCrawlAttempt = false.
+										System.err.println("[" + _name + "]: ERROR GETTING PRICE RANGE BUTTON2: " + url);
+										System.err.println(e2.getMessage());
+										
+										if (!isSecondCrawlAttempt)
+										{
+											isSecondCrawlAttempt = true;
+										}
+										didCrawl = false;
+										continue;
+									}
+								}
+								
+								// Click Price Button Element
+								priceRangeButton.click();
+								System.out.println("[" + _name + "]: Price button clicked.");
 				
-				// Wait for Price Range Button Element
-				WebElement priceRangeButton = (new WebDriverWait(driver, 10))
-					.until(ExpectedConditions.presenceOfElementLocated
-							(By.cssSelector(PRICE_BUTTON_CSS_SELECTOR)));
-	
-				// Click Price Button Element
-				priceRangeButton.click();
-				System.out.println("Button clicked");
-				Thread.sleep(2000);
+								// Wait for Price Text
+								WebElement priceText = GetWebElementByClassName(driver, PRICE_TEXT_CLASS, 15);
+								System.out.println("[" + _name + "]: priceText = " + priceText.getText());
+								
+								// Save PageSource
+								String yearMonthDirectory = _year + "_" + String.format("%02d", _month);
+								String modifiedCity = city.replaceAll(" ", "-");
+								String fileName = zipcode + "_" + modifiedCity + "_" + _month + "_" + _year + ".txt";
+								String directory = "./pagesources/" + yearMonthDirectory + "/" + _state + "/";
+								writeStringToFile(directory, fileName, driver.getPageSource());
+								
+								// If its the old price text, verify the period
+								if (isOldPriceText)
+								{
+									String foundPeriod = StringUtils.substringBetween(priceText.getText(), "per ", " for");
+									if (!((foundPeriod != null) && (foundPeriod.toLowerCase().equals("month")))) {
+										System.out.println("[" + _name + "][Error] Incorrect period, old text.");
+										didCrawl = true;
+										continue;
+									} else {
+										System.out.println("[" + _name + "][Success] Correct period, old text.");
+									}
+								}
+						
+								// Save to Database
+								Airbnb airbnb = new Airbnb();
+								airbnb.setCrawlTime(getCurrentTimestamp());
+								airbnb.setZipcode(convertToInt(zipcode));
+								airbnb.setCity(city);
+								airbnb.setState(_state);
+								airbnb.setUrl(url);
+								airbnb.setMonth(_month);
+								airbnb.setYear(_year);
+								airbnb.setAveragePrice(convertToInt(getNumericalCharacters(priceText.getText())));
+								airbnb.print();
 				
-				// Wait for Price Text
-				WebElement priceText = null;
-				try
-				{
-					priceText = (new WebDriverWait(driver, 10))
-							.until(ExpectedConditions.presenceOfElementLocated(By.className(PRICE_TEXT_CLASS)));
-				}
-				catch (Exception e)
-				{
-					// Price text did not show up on page despite there being listings. Error out!
-					System.err.println("[" + _name + "] ERROR: " + e.getMessage());
-					e.printStackTrace();
-					System.exit(-1);
-				}
-	
-				System.out.println("[" + _name + "] priceText = " + priceText.getText());
-	
-				// Verify Period (Monthly/Daily/etc)
-				String foundPeriod = StringUtils.substringBetween(priceText.getText(), "per ", " for");
-				if ((foundPeriod != null) && (foundPeriod.toLowerCase().equals("month"))) {
-					System.out.println("[" + _name + "][Success] Period verified.");
-	
-					// Verify City
-					String foundCity = StringUtils.substringBetween(priceText.getText(), "for ", " is");
-					if ((foundCity != null) && (foundCity.toLowerCase().equals(city.toLowerCase()))) {
-						System.out.println("[" + _name + "][Success] City verified.");
-	
-						// Save to Database
-						Airbnb airbnb = new Airbnb();
-						airbnb.setCrawlTime(getCurrentTimestamp());
-						airbnb.setZipcode(convertToInt(zipcode));
-						airbnb.setCity(city);
-						airbnb.setState(_state);
-						airbnb.setUrl(url);
-						airbnb.setMonth(_month);
-						airbnb.setYear(_year);
-						airbnb.setAveragePrice(convertToInt(getNumericalCharacters(priceText.getText())));
-						airbnb.print();
-	
-						saveAirbnbToDatabase(airbnb);
+								saveAirbnbToDatabase(airbnb);
+							} else {
+								System.out.println("[" + _name + "]:[Error] Incorrect period.");
+							}
+						} else {
+							System.out.println("[" + _name + "]:[Error] Insufficient listings.");
+						}
 					} else {
-						System.out.println("[" + _name + "][Error] Incorrect city.");
+						System.out.println("[" + _name + "]:[Error] Incorrect city.");
 					}
 				} else {
-					System.out.println("[" + _name + "][Error] Incorrect period.");
+					System.out.println("[" + _name + "]:[Error] No city found.");
 				}
-			} else {
-				System.out.println("[" + _name + "][Error] Insufficient listings.");
-			}
 	
-			System.out.println("Finished crawling " + zipcode + ", " + _checkInDate + " - " + _checkOutDate);
-		} catch (WebDriverException e) {
-			System.err.println("[" + _name + "] ERROR: " + e.getMessage());
-			e.printStackTrace();
-			return;
+				System.out.println("[" + _name + "]: Finished crawling " + zipcode + ", " + _checkInDate + " - " + _checkOutDate);
+			} catch (WebDriverException e) {
+				System.err.println("[" + _name + "]: ERROR: " + e.getMessage());
+				System.err.println(url);
+				return;
+			}
+			didCrawl = true;
 		}
+	}
+
+	public WebElement GetWebElementByClassName(WebDriver driver, String locator, int time) {
+		return (new WebDriverWait(driver, 15))
+				.ignoring(NoSuchElementException.class)
+				.ignoring(StaleElementReferenceException.class)
+				.until(ExpectedConditions.presenceOfElementLocated(By.className(locator)));
+	}
+
+	public WebElement GetWebElementByCSS(WebDriver driver, String locator, int time) {
+		return (new WebDriverWait(driver, 15))
+				.ignoring(NoSuchElementException.class)
+				.ignoring(StaleElementReferenceException.class)
+				.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(locator)));
 	}
 
 	/**

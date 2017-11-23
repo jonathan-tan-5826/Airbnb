@@ -1,8 +1,11 @@
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
@@ -12,8 +15,11 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.openqa.selenium.By;
+import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.Proxy;
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebDriverException;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
@@ -28,7 +34,8 @@ public class Crawler {
 	private static Connection _connection;
 	private WebDriver _driver;
 	private static int _numBuckets = 15;
-	private static final String VERSION = "2.06";
+	private static boolean _doTestIp = false;
+	private static final String VERSION = "2.21";
 	private static final String[] GROUP_ONE = { "AL", "AR", "CA" };
 	private static final String[] GROUP_TWO = { "AK", "AZ", "MI", "NY" };
 	private static final String[] GROUP_THREE = { "CO", "GA", "PA", "UT" };
@@ -44,6 +51,12 @@ public class Crawler {
 			"d08.cs.ucr.edu:3128", "d09.cs.ucr.edu:3128", "d10.cs.ucr.edu:3128", "dblab-rack10.cs.ucr.edu:3128",
 			"dblab-rack11.cs.ucr.edu:3128", "dblab-rack12.cs.ucr.edu:3128", "dblab-rack13.cs.ucr.edu:3128",
 			"dblab-rack14.cs.ucr.edu:3128", "dblab-rack15.cs.ucr.edu:3128"};
+	private static final String LISTING_CSS_SELECTOR = "div._fhph4u ._1mpo9ida";
+	private static final String PRICE_BUTTON_CSS_SELECTOR = "button[aria-controls='menuItemComponent-price_range']";
+	private static final String PRICE_BUTTON_CSS_SELECTOR2 = "button[aria-controls='menuItemComponent-price']";
+	private static final String PRICE_TEXT_CLASS = "_150a3jym";
+	private static final String PER_MONTH_SPAN_XPATH = "//span[.='Per month']";
+	private static final String CITY_XPATH = "//*[@id=\"english-canonical-url\"]";
 	
 	/**
 	 * @title main
@@ -52,9 +65,9 @@ public class Crawler {
 	 * @desc Main function
 	 */
 	public static void main(String[] args) throws Exception {
-		if (args.length < 4) {
+		if (args.length < 5) {
 			System.out.println("Error: Not enough arguments passed in.");
-			System.out.println("Correct usage: ./crawler <selection> <month> <year> <num_threads>");
+			System.out.println("Correct usage: ./crawler <selection> <month> <year> <num_threads> <1 to test IP, 0 otherwise>");
 			System.exit(1);
 		}
 
@@ -62,9 +75,20 @@ public class Crawler {
 		int month = convertToInt(args[1]);
 		int year = convertToInt(args[2]);
 		_numBuckets = convertToInt(args[3]);
+		int testIp = convertToInt(args[4]);
+		if (testIp != 0)
+		{
+			_doTestIp = true;
+		}
 
 		if (month < 1 || month > 12) {
 			System.out.println("Error: Invalid month passed in. Value must be between 1-12");
+			System.exit(1);
+		}
+		
+		if (_numBuckets < 1 || _numBuckets > 15)
+		{
+			System.out.println("Error: Invalid number of threads passed in. Value must be between 1-15");
 			System.exit(1);
 		}
 
@@ -119,7 +143,11 @@ public class Crawler {
 			crawler._driver.get("https://ipinfo.io");
 			WebElement test = (new WebDriverWait(crawler._driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
 			System.out.println("IpAddress = " + test.getText());
-			crawler.crawlZipcode("92508", "CA", month, year);
+			Calendar calendar = new GregorianCalendar(year, month - 1, 1);
+			int numDays = calendar.getActualMaximum(Calendar.DAY_OF_MONTH);
+			String checkInDate = year + "-" + month + "-01";
+			String checkOutDate = year + "-" + month + "-" + numDays;
+			crawlZipcode(crawler._driver, "Riverside", "92508", "CA", month, year, checkInDate, checkOutDate);
 			crawler._driver.quit();
 			
 //			File file = new File("G:/Eclipse/eclipse/chromedriver.exe");
@@ -131,7 +159,7 @@ public class Crawler {
 //			crawler._driver = new ChromeDriver(chromeOptions);
 //			crawler.crawlZipcode("92508", "CA", 2017, 11);
 		} else {
-			System.out.println("Invalid argument passed in. Valid arguments: all, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10");
+			System.out.println("Invalid selection passed in. Valid arguments: all, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, state_abbrev (EX: CA)");
 			System.out.println("Application exiting.");
 			System.exit(1);
 		}
@@ -201,11 +229,31 @@ public class Crawler {
 			}
 			result.close();
 			
-			CreateWorkerThreads(buckets, threads, threadStatuses, state, month, year, checkInDate, checkOutDate);
+			// If only 1 bucket, do not multi-thread.
+			if (_numBuckets == 1)
+			{
+				DesiredCapabilities cap = GetDesiredCapabilities(PROXIES[0]);
+				WebDriver driver = new FirefoxDriver(cap);
+				_connection = getConnection();
 
-			do {
-				UpdateThreadStatuses(threads, threadStatuses);
-			} while (ThreadsAreActive(threadStatuses));
+				for (int count = 0; count < buckets.get(0).size(); ++count) {
+					String city = buckets.get(0).get(count).getCity();
+					String zipcode = buckets.get(0).get(count).getZipcode();
+					crawlZipcode(driver, city, zipcode, state, month, year, checkInDate, checkOutDate);
+					
+					System.out.println(buckets.get(0).size() - count - 1 + " zipcodes remaining.");
+				}
+				_connection.close();
+			}
+			// If > 1 bucket, multi-thread.
+			else
+			{
+				CreateWorkerThreads(buckets, threads, threadStatuses, state, month, year, checkInDate, checkOutDate);
+
+				do {
+					UpdateThreadStatuses(threads, threadStatuses);
+				} while (ThreadsAreActive(threadStatuses));
+			}
 
 			System.out.println("Finished crawling " + state + ", " + month + "/" + year);
 		} catch (Exception e) {
@@ -213,6 +261,22 @@ public class Crawler {
 			e.printStackTrace();
 			System.exit(-1);
 		}
+	}
+
+	public static DesiredCapabilities GetDesiredCapabilities(String proxyAddress) {
+		Proxy proxy = new Proxy();
+		proxy.setAutodetect(false);
+		proxy.setProxyType(Proxy.ProxyType.MANUAL);
+		proxy.setHttpProxy(proxyAddress).setFtpProxy(proxyAddress).setSslProxy(proxyAddress);
+
+		FirefoxProfile profile = new FirefoxProfile();
+		profile.setPreference(FirefoxProfile.ALLOWED_HOSTS_PREFERENCE, "localhost");
+
+		DesiredCapabilities cap = new DesiredCapabilities();
+		cap.setCapability(CapabilityType.PROXY, proxy);
+		cap.setCapability(FirefoxDriver.PROFILE, profile);
+
+		return cap;
 	}
 	
 	/**
@@ -224,7 +288,8 @@ public class Crawler {
 	 *   	  month <int>,
 	 *        year <int>,
 	 *        checkInDate <String>,
-	 *        checkOutDate <String>
+	 *        checkOutDate <String>,
+	 *        runningStatus <RunnningStatus>
 	 * @return 
 	 * @desc Creates worker threads.
 	 */
@@ -252,7 +317,8 @@ public class Crawler {
 						checkOutDate,
 						month,
 						year,
-						VERSION);
+						VERSION,
+						_doTestIp);
 				threads.add(new Thread(worker));
 				threadStatuses.add(true);
 				threads.get(i).start();
@@ -306,26 +372,141 @@ public class Crawler {
 	 * @desc Extracts airbnb's average-price/month for zipcode<String> for month<int>,
 	 *       year<int> and stores extracted data into database.
 	 */
-	public void crawlZipcode(String zipcode, String state, int month, int year) throws Exception {
+	public static void crawlZipcode(WebDriver driver, String city, String zipcode, String state, int month, int year, String checkInDate, String checkOutDate) throws Exception {
+		String searchParameter = state + " " + zipcode + ", United-States";
+		String url = "https://www.airbnb.com/s/" + searchParameter + "/homes?checkin=" + checkInDate + "&checkout="
+				+ checkOutDate;
+
 		try {
-			System.out.println("Started crawler v2 on " + zipcode + ", " + month + "/" + year);
-			Calendar calendar = new GregorianCalendar(year, month - 1, 1);
-			int numDays = calendar.getActualMaximum(Calendar.DAY_OF_MONTH);
-			String checkInDate = year + "-" + month + "-01";
-			String checkOutDate = year + "-" + month + "-" + numDays;
-			String searchParameter = state + " " + zipcode + ", United-States";
-			String url = "https://www.airbnb.com/s/" + searchParameter + "/homes?checkin=" + checkInDate + "&checkout="
-					+ checkOutDate;
+			System.out.println("[ Program ]: Crawling " + zipcode + ", " + checkInDate + " - " + checkOutDate);
 			System.out.println(url);
 
-			savePageSourceFromListingUrl(zipcode, url);
+			// Load Page
+			driver.get(url);
 
-			System.out.println("Finished crawling " + zipcode + ", " + month + "/" + year);
-		} catch (Exception e) {
-			System.err.println("Error: " + e.getMessage());
-			e.printStackTrace();
-			System.exit(-1);
+			String yearMonthDirectory = year + "_" + String.format("%02d", month);
+			String modifiedCity = city.replaceAll(" ", "-");
+			String fileName = zipcode + "_" + modifiedCity + "_" + month + "_" + year + ".txt";
+			String directory = "./pagesources/" + yearMonthDirectory + "/" + state + "/";
+			writeStringToFile(directory, fileName, driver.getPageSource());
+
+			// Verify there are at least 5 listings
+			(new WebDriverWait(driver, 15))
+					.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(LISTING_CSS_SELECTOR)));
+			if (driver.findElements(By.cssSelector(LISTING_CSS_SELECTOR)).size() >= 5) {
+				System.out.println("[ Program ][Success] Sufficient listings");
+
+				// Save PageSource
+				writeStringToFile(directory, fileName, driver.getPageSource());
+
+				WebElement priceRangeButton = null;
+				try {
+					// Wait for Price Range Button Element
+					priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR, 15);
+				} catch (WebDriverException e) {
+					// Price button did not show up on page despite there being listings. Error out!
+					System.err.println("[ Program ] ERROR GETTING PRICE RANGE BUTTON: " + url);
+					System.err.println(e.getMessage());
+					System.exit(-1);
+				}
+
+				// Click Price Button Element
+				priceRangeButton.click();
+				System.out.println("[ Program ]: Price button clicked.");
+
+				// Wait for Price Text
+				WebElement priceText = GetWebElementByClassName(driver, PRICE_TEXT_CLASS, 15);
+
+				System.out.println("[ Program ] priceText = " + priceText.getText());
+
+				// Verify Period (Monthly/Daily/etc)
+				List<WebElement> foundPeriods = driver.findElements(By.xpath(PER_MONTH_SPAN_XPATH));
+				if (foundPeriods.size() > 0) {
+					System.out.println("[ Program ][Success] Period verified.");
+
+					// Verify City
+					List<WebElement> cityTexts = driver.findElements(By.xpath(CITY_XPATH));
+					if (cityTexts.size() > 0)
+					{
+						String prefix = "/s/";
+						String suffix = "--" + state;
+						String foundCity = StringUtils.substringBetween(cityTexts.get(0).getAttribute("content").toString(), prefix, suffix);
+						if ((foundCity != null) && (foundCity.toLowerCase().replaceAll("-", " ").equals(city.toLowerCase()))) {
+							System.out.println("[ Program ][Success] City verified.");
+
+							// Save to Database
+							Airbnb airbnb = new Airbnb();
+							airbnb.setCrawlTime(getCurrentTimestamp());
+							airbnb.setZipcode(convertToInt(zipcode));
+							airbnb.setCity(city);
+							airbnb.setState(state);
+							airbnb.setUrl(url);
+							airbnb.setMonth(month);
+							airbnb.setYear(year);
+							airbnb.setAveragePrice(convertToInt(getNumericalCharacters(priceText.getText())));
+							airbnb.print();
+
+							saveAirbnbToDatabase(airbnb);
+						} else {
+							System.out.println("[ Program ][Error] Incorrect city.");
+						}
+					} else {
+						System.out.println("[ Program ][Error] No city found.");
+					}
+				} else {
+					System.out.println("[ Program ][Error] Incorrect period.");
+				}
+			} else {
+				System.out.println("[ Program ][Error] Insufficient listings.");
+			}
+
+			System.out.println("Finished crawling " + zipcode + ", " + checkInDate + " - " + checkOutDate);
+		} catch (WebDriverException e) {
+			System.err.println("[ Program ] ERROR: " + e.getMessage());
+			System.err.println(url);
+			return;
 		}
+	}
+	
+	/**
+	 * @title saveAirbnbToDatabase
+	 * @param airbnb<Airbnb>
+	 * @throws Exception
+	 * @desc Inserts airbnb's data to database
+	 */
+	public static void saveAirbnbToDatabase(Airbnb airbnb) throws Exception {
+		System.out.println("[ Program ] Entered saveAirbnbToDatabase");
+
+		String sqlStatement = "INSERT INTO airbnb(zipcode, average_price, month, year, url, crawl_time) VALUES(?,?,?,?,?,?)";
+		PreparedStatement preparedStatement = _connection.prepareStatement(sqlStatement);
+		// 1
+		preparedStatement.setInt(1, airbnb.getZipcode());
+		// 2
+		preparedStatement.setInt(2, airbnb.getAveragePrice());
+		// 3
+		preparedStatement.setInt(3, airbnb.getMonth());
+		// 4
+		preparedStatement.setInt(4, airbnb.getYear());
+		// 5
+		preparedStatement.setString(5, airbnb.getUrl());
+		// 6
+		preparedStatement.setTimestamp(6, airbnb.getCrawlTime());
+		preparedStatement.executeUpdate();
+		preparedStatement.close();
+	}
+
+	public static WebElement GetWebElementByClassName(WebDriver driver, String locator, int time) {
+		return (new WebDriverWait(driver, 15))
+				.ignoring(NoSuchElementException.class)
+				.ignoring(StaleElementReferenceException.class)
+				.until(ExpectedConditions.presenceOfElementLocated(By.className(locator)));
+	}
+
+	public static WebElement GetWebElementByCSS(WebDriver driver, String locator, int time) {
+		return (new WebDriverWait(driver, 15))
+				.ignoring(NoSuchElementException.class)
+				.ignoring(StaleElementReferenceException.class)
+				.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(locator)));
 	}
 
 	/**
@@ -386,7 +567,7 @@ public class Crawler {
 	 * @desc Creates fileName, if it does not exist, in /pagesources and writes text
 	 *       to file.
 	 */
-	public void writeStringToFile(String directory, String fileName, String text) throws Exception {
+	public static void writeStringToFile(String directory, String fileName, String text) throws Exception {
 		String fullFileName = directory + fileName;
 
 		File file = new File(fullFileName);
@@ -419,22 +600,29 @@ public class Crawler {
 	}
 
 	/**
-	 * @title getConnectionToZipcodes
+	 * @title getConnection
 	 * @param
-	 * @return connection<Connection> to MySQL database where zipcodes are stored
+	 * @return connection<Connection> to MySQL database where data will be stored
 	 */
-	private static Connection getConnection() throws Exception {
+	private static Connection getConnection() throws ClassNotFoundException, SQLException {
 		Class.forName("com.mysql.jdbc.Driver");
-		String urldb = "jdbc:mysql://localhost/business";
+		String urldb = "jdbc:mysql://localhost/homeDB";
 		String user = "jonathan";
 		String password = "password";
+
 		Connection connection = DriverManager.getConnection(urldb, user, password);
 		return connection;
 	}
 
-	public static void tryExitDriver(WebDriver driver) {
-		if (driver != null) {
-			driver.close();
-		}
+	/**
+	 * @title getCurrentTimestamp
+	 * @param
+	 * @return currentTimestamp<Timestamp>
+	 */
+	private static Timestamp getCurrentTimestamp() {
+		System.out.println("[ Program ] Entered getCurrentTimestamp");
+
+		Timestamp currentTimestamp = new java.sql.Timestamp(Calendar.getInstance().getTime().getTime());
+		return currentTimestamp;
 	}
 }
