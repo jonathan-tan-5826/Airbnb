@@ -13,16 +13,14 @@ General explanation:
 3) For each bucket with CityZips, a worker thread is assigned to crawl Airbnb for each zipcode in the bucket for the month and year passed in.
 
 Inside the worker threads:
-1) Worker calculates the check-in date and check-out date based on the month and year passed in.
-2) For each zipcode the worker performs the following...
-3) Opens a Firefox Web Driver
-4) Constructs the URL & loads the page in the driver
-5) Verifies there are at least 5 listings on the page. If not, the worker closes the driver and continues to the next zipcode.
-6) Saves the page source
-7) Waits for price range button to appear. If it does not appear in time, program errors out and exits. Otherwise, the button is pressed.
-8) Waits for price-text to appear to obtain the average price.
-9) Verifies the period (Makes sure the average price is for monthly). If the average price is not for the month, the worker closes the driver and continues to the next zipcode.
-10) Verifies the city listed on the webpage matches the zipcode's city. If not, the worker closes the driver and continues to the next zipcode.
-11) Saves information to database.
-12) Closes the Firefox Web Driver and restarts at step 3 with the next zipcode.
+For each zipcode in the worker's pass in bucket, the worker performs the following...
+1) Loads URL in Firefox driver
+2) Verifies the city listed on the webpage matches the zipcode's city. If not, the worker continues to the next zipcode.
+3) Verifies there are at least 5 listings on the page. If not, the worker continues to the next zipcode.
+4) Verifies the period (Makes sure the average price is for the month). If not, the worker continues to the next zipcode.
+5) Waits for price range button to appear using new selector. If the button does not appear, attempts to get price range button with the old selector. If both fail to appear and the flag, isSecondCrawlAttempt, is true, the worker continues to the next zipcode. Otherwise, the worker sets the isSecondCrawlAttempt to true and restarts at step 1 for this zipcode. 
+6) Worker clicks the price button and waits for price-text to appear to obtain the average price.
+6a) If the price button was obtained using the old selector, validates the city again. If the city is invalid, the worker continues to the next zipcode.
+7) Worker saves page source.
+8) Worker obtains the average price from the price-text and saves the information to database.
 
