@@ -35,7 +35,7 @@ public class Crawler {
 	private WebDriver _driver;
 	private static int _numBuckets = 15;
 	private static boolean _doTestIp = false;
-	private static final String VERSION = "2.21";
+	private static final String VERSION = "2.22";
 	private static final String[] GROUP_ONE = { "AL", "AR", "CA" };
 	private static final String[] GROUP_TWO = { "AK", "AZ", "MI", "NY" };
 	private static final String[] GROUP_THREE = { "CO", "GA", "PA", "UT" };
@@ -51,12 +51,13 @@ public class Crawler {
 			"d08.cs.ucr.edu:3128", "d09.cs.ucr.edu:3128", "d10.cs.ucr.edu:3128", "dblab-rack10.cs.ucr.edu:3128",
 			"dblab-rack11.cs.ucr.edu:3128", "dblab-rack12.cs.ucr.edu:3128", "dblab-rack13.cs.ucr.edu:3128",
 			"dblab-rack14.cs.ucr.edu:3128", "dblab-rack15.cs.ucr.edu:3128"};
-	private static final String LISTING_CSS_SELECTOR = "div._fhph4u ._1mpo9ida";
+	private static final String LISTING_XPATH = "//div[@class='_1788tsr0']";
 	private static final String PRICE_BUTTON_CSS_SELECTOR = "button[aria-controls='menuItemComponent-price_range']";
 	private static final String PRICE_BUTTON_CSS_SELECTOR2 = "button[aria-controls='menuItemComponent-price']";
 	private static final String PRICE_TEXT_CLASS = "_150a3jym";
 	private static final String PER_MONTH_SPAN_XPATH = "//span[.='Per month']";
 	private static final String CITY_XPATH = "//*[@id=\"english-canonical-url\"]";
+	private static final String PREFIX = "/s/";
 	
 	/**
 	 * @title main
@@ -139,15 +140,20 @@ public class Crawler {
 		    DesiredCapabilities cap = new DesiredCapabilities();
 		    cap.setCapability(CapabilityType.PROXY, proxy);
 		    cap.setCapability(FirefoxDriver.PROFILE, profile);
-			crawler._driver = new FirefoxDriver(cap);
-			crawler._driver.get("https://ipinfo.io");
-			WebElement test = (new WebDriverWait(crawler._driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
-			System.out.println("IpAddress = " + test.getText());
+		    crawler._driver = new FirefoxDriver(cap);
+		    
+		    if (_doTestIp)
+		    {
+		    	crawler._driver.get("https://ipinfo.io");
+		    	WebElement test = (new WebDriverWait(crawler._driver, 10)).until(ExpectedConditions.presenceOfElementLocated(By.xpath("/html/body/header/div/div/div[2]/div[1]/p")));
+		    	System.out.println("IpAddress = " + test.getText());
+		    }
+		    
 			Calendar calendar = new GregorianCalendar(year, month - 1, 1);
 			int numDays = calendar.getActualMaximum(Calendar.DAY_OF_MONTH);
 			String checkInDate = year + "-" + month + "-01";
 			String checkOutDate = year + "-" + month + "-" + numDays;
-			crawlZipcode(crawler._driver, "Riverside", "92508", "CA", month, year, checkInDate, checkOutDate);
+			crawlZipcode(crawler._driver, "Arab", "35016", "AL", month, year, checkInDate, checkOutDate);
 			crawler._driver.quit();
 			
 //			File file = new File("G:/Eclipse/eclipse/chromedriver.exe");
@@ -373,98 +379,130 @@ public class Crawler {
 	 *       year<int> and stores extracted data into database.
 	 */
 	public static void crawlZipcode(WebDriver driver, String city, String zipcode, String state, int month, int year, String checkInDate, String checkOutDate) throws Exception {
+		boolean didCrawl = false;
+		boolean isSecondCrawlAttempt = false;
+		boolean isOldPriceText = false;
+		String suffix = "--" + state;
 		String searchParameter = state + " " + zipcode + ", United-States";
 		String url = "https://www.airbnb.com/s/" + searchParameter + "/homes?checkin=" + checkInDate + "&checkout="
 				+ checkOutDate;
-
-		try {
-			System.out.println("[ Program ]: Crawling " + zipcode + ", " + checkInDate + " - " + checkOutDate);
-			System.out.println(url);
-
-			// Load Page
-			driver.get(url);
-
-			String yearMonthDirectory = year + "_" + String.format("%02d", month);
-			String modifiedCity = city.replaceAll(" ", "-");
-			String fileName = zipcode + "_" + modifiedCity + "_" + month + "_" + year + ".txt";
-			String directory = "./pagesources/" + yearMonthDirectory + "/" + state + "/";
-			writeStringToFile(directory, fileName, driver.getPageSource());
-
-			// Verify there are at least 5 listings
-			(new WebDriverWait(driver, 15))
-					.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(LISTING_CSS_SELECTOR)));
-			if (driver.findElements(By.cssSelector(LISTING_CSS_SELECTOR)).size() >= 5) {
-				System.out.println("[ Program ][Success] Sufficient listings");
-
-				// Save PageSource
-				writeStringToFile(directory, fileName, driver.getPageSource());
-
-				WebElement priceRangeButton = null;
-				try {
-					// Wait for Price Range Button Element
-					priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR, 15);
-				} catch (WebDriverException e) {
-					// Price button did not show up on page despite there being listings. Error out!
-					System.err.println("[ Program ] ERROR GETTING PRICE RANGE BUTTON: " + url);
-					System.err.println(e.getMessage());
-					System.exit(-1);
-				}
-
-				// Click Price Button Element
-				priceRangeButton.click();
-				System.out.println("[ Program ]: Price button clicked.");
-
-				// Wait for Price Text
-				WebElement priceText = GetWebElementByClassName(driver, PRICE_TEXT_CLASS, 15);
-
-				System.out.println("[ Program ] priceText = " + priceText.getText());
-
-				// Verify Period (Monthly/Daily/etc)
-				List<WebElement> foundPeriods = driver.findElements(By.xpath(PER_MONTH_SPAN_XPATH));
-				if (foundPeriods.size() > 0) {
-					System.out.println("[ Program ][Success] Period verified.");
-
-					// Verify City
-					List<WebElement> cityTexts = driver.findElements(By.xpath(CITY_XPATH));
-					if (cityTexts.size() > 0)
-					{
-						String prefix = "/s/";
-						String suffix = "--" + state;
-						String foundCity = StringUtils.substringBetween(cityTexts.get(0).getAttribute("content").toString(), prefix, suffix);
-						if ((foundCity != null) && (foundCity.toLowerCase().replaceAll("-", " ").equals(city.toLowerCase()))) {
-							System.out.println("[ Program ][Success] City verified.");
-
-							// Save to Database
-							Airbnb airbnb = new Airbnb();
-							airbnb.setCrawlTime(getCurrentTimestamp());
-							airbnb.setZipcode(convertToInt(zipcode));
-							airbnb.setCity(city);
-							airbnb.setState(state);
-							airbnb.setUrl(url);
-							airbnb.setMonth(month);
-							airbnb.setYear(year);
-							airbnb.setAveragePrice(convertToInt(getNumericalCharacters(priceText.getText())));
-							airbnb.print();
-
-							saveAirbnbToDatabase(airbnb);
+		
+		while (!didCrawl && !isSecondCrawlAttempt)
+		{
+			try {
+				System.out.println("[ Program ]: Crawling " + zipcode + ", " + checkInDate + " - " + checkOutDate);
+				System.out.println(url);
+	
+				// Load Page
+				driver.get(url);
+				
+				// Verify city
+				(new WebDriverWait(driver, 15)).until(ExpectedConditions.presenceOfElementLocated(By.xpath(CITY_XPATH)));
+				List<WebElement> cityTexts = driver.findElements(By.xpath(CITY_XPATH));
+				if (cityTexts.size() > 0)
+				{
+					String foundCity = StringUtils.substringBetween(cityTexts.get(0).getAttribute("content").toString(), PREFIX, suffix);
+					if ((foundCity != null) && (foundCity.toLowerCase().replaceAll("-", " ").equals(city.toLowerCase()))) {
+						System.out.println("[ Program ]:[Success] City verified.");
+						
+						// Verify there are at least 5 listings
+						(new WebDriverWait(driver, 15))
+								.until(ExpectedConditions.presenceOfElementLocated(By.xpath(LISTING_XPATH)));
+						if (driver.findElements(By.xpath(LISTING_XPATH)).size() >= 5) {
+							System.out.println("[ Program ]:[Success] Sufficient listings");
+			
+							// Verify period
+							List<WebElement> foundPeriods = driver.findElements(By.xpath(PER_MONTH_SPAN_XPATH));
+							if (foundPeriods.size() > 0) {
+								System.out.println("[ Program ]:[Success] Period verified.");
+									
+								WebElement priceRangeButton = null;
+								try {
+									// Wait for Price Range Button Element
+									priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR, 15);
+								} catch (WebDriverException e) {
+									// Price button did not show up on page despite there being listings. Try other CSS selector.
+									System.err.println("[ Program ]: ERROR GETTING PRICE RANGE BUTTON1: " + url);
+									System.err.println(e.getMessage());
+									
+									try {
+										priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR2, 15);
+										isOldPriceText = true;
+									} catch (WebDriverException e2) {
+										// Both CSS selectors failed, try again if isSecondCrawlAttempt = false.
+										System.err.println("[ Program ]: ERROR GETTING PRICE RANGE BUTTON2: " + url);
+										System.err.println(e2.getMessage());
+										
+										if (!isSecondCrawlAttempt)
+										{
+											isSecondCrawlAttempt = true;
+										}
+										didCrawl = false;
+										continue;
+									}
+								}
+								
+								// Click Price Button Element
+								priceRangeButton.click();
+								System.out.println("[ Program ]: Price button clicked.");
+				
+								// Wait for Price Text
+								WebElement priceText = GetWebElementByClassName(driver, PRICE_TEXT_CLASS, 15);
+								System.out.println("[ Program ]: priceText = " + priceText.getText());
+								
+								// Save PageSource
+								String yearMonthDirectory = year + "_" + String.format("%02d", month);
+								String modifiedCity = city.replaceAll(" ", "-");
+								String fileName = zipcode + "_" + modifiedCity + "_" + month + "_" + year + ".txt";
+								String directory = "./pagesources/" + yearMonthDirectory + "/" + state + "/";
+								writeStringToFile(directory, fileName, driver.getPageSource());
+								
+								// If its the old price text, verify the period
+								if (isOldPriceText)
+								{
+									String foundPeriod = StringUtils.substringBetween(priceText.getText(), "per ", " for");
+									if (!((foundPeriod != null) && (foundPeriod.toLowerCase().equals("month")))) {
+										System.out.println("[ Program ][Error] Incorrect period, old text.");
+										didCrawl = true;
+										continue;
+									} else {
+										System.out.println("[ Program ][Success] Correct period, old text.");
+									}
+								}
+						
+								// Save to Database
+//								Airbnb airbnb = new Airbnb();
+//								airbnb.setCrawlTime(getCurrentTimestamp());
+//								airbnb.setZipcode(convertToInt(zipcode));
+//								airbnb.setCity(city);
+//								airbnb.setState(state);
+//								airbnb.setUrl(url);
+//								airbnb.setMonth(month);
+//								airbnb.setYear(year);
+//								airbnb.setAveragePrice(convertToInt(getNumericalCharacters(priceText.getText())));
+//								airbnb.print();
+//				
+//								saveAirbnbToDatabase(airbnb);
+							} else {
+								System.out.println("[ Program ]:[Error] Incorrect period.");
+							}
 						} else {
-							System.out.println("[ Program ][Error] Incorrect city.");
+							System.out.println("[ Program ]:[Error] Insufficient listings.");
 						}
 					} else {
-						System.out.println("[ Program ][Error] No city found.");
+						System.out.println("[ Program ]:[Error] Incorrect city.");
 					}
 				} else {
-					System.out.println("[ Program ][Error] Incorrect period.");
+					System.out.println("[ Program ]:[Error] No city found.");
 				}
-			} else {
-				System.out.println("[ Program ][Error] Insufficient listings.");
+	
+				System.out.println("[ Program ]: Finished crawling " + zipcode + ", " + checkInDate + " - " + checkOutDate);
+			} catch (WebDriverException e) {
+				System.err.println("[ Program ]: ERROR: " + e.getMessage());
+				System.err.println(url);
+				return;
 			}
-
-			System.out.println("Finished crawling " + zipcode + ", " + checkInDate + " - " + checkOutDate);
-		} catch (WebDriverException e) {
-			System.err.println("[ Program ] ERROR: " + e.getMessage());
-			System.err.println(url);
-			return;
+			didCrawl = true;
 		}
 	}
 	

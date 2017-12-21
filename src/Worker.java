@@ -34,7 +34,7 @@ public class Worker implements Runnable {
 	private String _proxyAddress;
 	private String _version;
 	private String _suffix;
-	private static final String LISTING_CSS_SELECTOR = "div._fhph4u ._1mpo9ida";
+	private static final String LISTING_XPATH = "//div[@class='_1788tsr0']";
 	private static final String PRICE_BUTTON_CSS_SELECTOR = "button[aria-controls='menuItemComponent-price_range']";
 	private static final String PRICE_BUTTON_CSS_SELECTOR2 = "button[aria-controls='menuItemComponent-price']";
 	private static final String PRICE_TEXT_CLASS = "_150a3jym";
@@ -143,8 +143,8 @@ public class Worker implements Runnable {
 						
 						// Verify there are at least 5 listings
 						(new WebDriverWait(driver, 15))
-								.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(LISTING_CSS_SELECTOR)));
-						if (driver.findElements(By.cssSelector(LISTING_CSS_SELECTOR)).size() >= 5) {
+								.until(ExpectedConditions.presenceOfElementLocated(By.xpath(LISTING_XPATH)));
+						if (driver.findElements(By.xpath(LISTING_XPATH)).size() >= 5) {
 							System.out.println("[" + _name + "]:[Success] Sufficient listings");
 			
 							// Verify period

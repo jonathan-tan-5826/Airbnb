@@ -1,6 +1,6 @@
 # Airbnb Crawler
 
-A multi-threaded crawler written in Java to obtain the average price per month per zipcode for renting homes through Airbnb.
+A single/multi-threaded crawler written in Java to obtain the average price per month per zipcode for renting homes through Airbnb.
 
 Technologies used:
 Selenium-Java 2.53
@@ -8,9 +8,10 @@ Maven 3.0.2
 MySQL-Connector-Java 5.1.6
 
 General explanation:
-1) Pass in a state abbreviation or group number (1-10), month, year, and desired number of threads (Ex: java -jar airbnb_crawler_v2.jar CA 10 2017 10)
+1) Pass in a state abbreviation or group number (1-10), month, year, desired number of threads, and 1 to testIP or 0 not to. (Ex: java -jar airbnb_crawler_v2.jar CA 10 2017 10 1)
 2) Queries the database for all zipcodes in that state, along with their corresponding cities, and distributes the CityZip amongst X buckets (X = passed in desired number of threads).
 3) For each bucket with CityZips, a worker thread is assigned to crawl Airbnb for each zipcode in the bucket for the month and year passed in.
+[NOTE] If your desired number of threads is 1, the program will run without multi-threading.
 
 Inside the worker threads:
 For each zipcode in the worker's pass in bucket, the worker performs the following...
