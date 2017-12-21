@@ -32,3 +32,6 @@ For each zipcode in the worker's pass in bucket, the worker performs the followi
 7) Worker saves page source.
 8) Worker obtains the average price from the price-text and saves the information to database.
 
+Testing the crawler:
+Use the following command to test the crawler.
+java -jar airbnb_crawler_v2.jar test 1 2017 1 1
