@@ -166,7 +166,7 @@ public class Worker implements Runnable {
 										priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR2, 15);
 										isOldPriceText = true;
 									} catch (WebDriverException e2) {
-										// Both CSS selectors failed, try again if crawlAttempts < 2.
+										// Both CSS selectors failed, try again if crawlAttempts < TOTAL_RETRIES.
 										System.err.println("[" + _name + "]: ERROR GETTING PRICE RANGE BUTTON2: " + url);
 										System.err.println(e2.getMessage());
 										
