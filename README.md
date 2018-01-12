@@ -26,7 +26,7 @@ For each zipcode in the worker's pass in bucket, the worker performs the followi
 2) Verifies the city listed on the webpage matches the zipcode's city. If not, the worker continues to the next zipcode.
 3) Verifies there are at least 5 listings on the page. If not, the worker continues to the next zipcode.
 4) Verifies the period (Makes sure the average price is for the month). If not, the worker continues to the next zipcode.
-5) Waits for price range button to appear using new selector. If the button does not appear, attempts to get price range button with the old selector. If both fail to appear and the flag, isSecondCrawlAttempt, is true, the worker continues to the next zipcode. Otherwise, the worker sets the isSecondCrawlAttempt to true and restarts at step 1 for this zipcode. 
+5) Waits for price range button to appear using new selector. If the button does not appear, attempts to get price range button with the old selector. If both fail to appear, increment crawlAttempts (initially 0). If crawlAttempts < TOTAL_RETRIES, worker restarts at step 1 for this zipcode. If crawlAttempts >= TOTAL_RETRIES, worker continues to the next zipcode.
 6) Worker clicks the price button and waits for price-text to appear to obtain the average price.
 6a) If the price button was obtained using the old selector, validates the city again. If the city is invalid, the worker continues to the next zipcode.
 7) Worker saves page source.

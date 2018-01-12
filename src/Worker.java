@@ -41,6 +41,7 @@ public class Worker implements Runnable {
 	private static final String PER_MONTH_SPAN_XPATH = "//span[.='Per month']";
 	private static final String CITY_XPATH = "//*[@id=\"english-canonical-url\"]";
 	private static final String PREFIX = "/s/";
+	private static final char TOTAL_RETRIES = 2;
 	private boolean _testIp;
 	private boolean _didTestIp = false;
 
@@ -117,13 +118,13 @@ public class Worker implements Runnable {
 
 	public void crawlZipcode(WebDriver driver, String city, String zipcode) throws Exception {
 		boolean didCrawl = false;
-		boolean isSecondCrawlAttempt = false;
+		char crawlAttempts = 0;
 		boolean isOldPriceText = false;
 		String searchParameter = _state + " " + zipcode + ", United-States";
 		String url = "https://www.airbnb.com/s/" + searchParameter + "/homes?checkin=" + _checkInDate + "&checkout="
 				+ _checkOutDate;
 		
-		while (!didCrawl && !isSecondCrawlAttempt)
+		while (!didCrawl && (crawlAttempts < TOTAL_RETRIES))
 		{
 			try {
 				System.out.println("[" + _name + "]: Crawling " + zipcode + ", " + _checkInDate + " - " + _checkOutDate);
@@ -165,14 +166,11 @@ public class Worker implements Runnable {
 										priceRangeButton = GetWebElementByCSS(driver, PRICE_BUTTON_CSS_SELECTOR2, 15);
 										isOldPriceText = true;
 									} catch (WebDriverException e2) {
-										// Both CSS selectors failed, try again if isSecondCrawlAttempt = false.
+										// Both CSS selectors failed, try again if crawlAttempts < 2.
 										System.err.println("[" + _name + "]: ERROR GETTING PRICE RANGE BUTTON2: " + url);
 										System.err.println(e2.getMessage());
 										
-										if (!isSecondCrawlAttempt)
-										{
-											isSecondCrawlAttempt = true;
-										}
+										crawlAttempts++;
 										didCrawl = false;
 										continue;
 									}
